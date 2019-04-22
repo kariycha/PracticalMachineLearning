@@ -1,0 +1,188 @@
+---
+title: "Prediction Assignment Writeup"
+author: "CK"
+date: "19 April 2019"
+output: html_document
+keep_md: yes
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect 
+a large amount of data about personal activity. In this project, data from 
+accelerometers on the belt, forearm, arm, and dumbell of 6 participants were used. 
+They were asked to perform barbell lifts correctly and incorrectly in 5 different ways 
+("classe" variable in the dataset). 
+More information is available from the website here: 
+http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting 
+Exercise Dataset).
+The goal of the project is to predict the manner ("classe) in which the participants did the exercise.
+
+## Data
+
+The training data downloaded from:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data downloaded from:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r downloadData, cache=TRUE}
+TrainUrl    <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+TestUrl     <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+TrainFile   <- "pml-traininig.csv"
+TestFile    <- "pml-testing.csv"
+
+# download the datasets
+download.file(TrainUrl,destfile = TrainFile)
+training <- read.csv(TrainFile)
+
+download.file(TestUrl,destfile = TestFile)
+testing  <- read.csv(TestFile)
+```
+## R Libraries
+
+List of libraries utilised
+```{r libraries, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(kableExtra)
+```
+
+## Cleaning data
+```{r explore}
+dim(training)
+dim(testing)
+
+trainnacols <- sapply(training,function(x)all(any(is.na(x)))) 
+trainnanames<- names(training[,trainnacols])
+testnacols  <- sapply(testing,function(x)all(any(is.na(x))))  
+testnanames<- names(testing[,testnacols])
+```
+
+There are large number of columns with no data in both training dataset: 
+**`r length(names(training[trainnacols]))`** and testing dataset: 
+**`r length(names(testing[testnacols]))`**. Since both dataset must have same 
+columns, all columns with NA will be removed from both datasets. 
+
+```{r cleandata}
+allnacol <- (trainnacols+testnacols>0)
+trainclean <- training[,!names(training) %in% trainnanames]
+trainclean <- trainclean[,!names(trainclean) %in% testnanames]
+
+# testclean <- testing[,!allnacol]
+
+testclean <- testing[,!names(testing) %in% trainnanames]
+testclean <- testclean[,!names(testclean) %in% testnanames]
+
+dim(trainclean)
+dim(testclean)
+```
+
+## Exploratory Analysis
+
+Now some exploratory analysis:
+```{r explore2}
+freqClasse <- cbind(table(trainclean$classe),round(prop.table(table(trainclean$classe))*100,2))
+
+colnames(freqClasse) <- c('Count','Percentage')
+
+freqClasse
+
+ggplot(trainclean, aes(classe)) +
+    geom_bar(fill = "blue")
+```
+
+## Prediction Model Building
+
+Partition the training dataset 70/30 ratio, 30% used for testing
+
+```{r crossvalidation}
+set.seed(1234)
+
+inTrain  <- createDataPartition(trainclean$classe, p=0.7, list=FALSE)
+TrainSet <- trainclean[inTrain, ]
+TestSet  <- trainclean[-inTrain, ]
+```
+
+### Cross validation
+
+For this project K-Fold Cross validation with k=10 is used. K-Fold is a robust 
+method for estimating accuracy,
+```{r kfold}
+# define training control
+trCtrl <- trainControl(method="cv", number=10)
+metrc <- "Accuracy"
+```
+
+### Prediction Model Selection
+
+**Random Forest ("rf")**
+```{r rf, cache=TRUE, message=FALSE, warning=FALSE}
+set.seed(1234)
+#fitrf  <- train(classe~., data=TrainSet, method="rf", metric=metrc, trControl=trCtrl)
+fitrf  <- train(classe~., data=TrainSet, method="rf")
+predrf <- predict(fitrf, TestSet)
+confrf <- confusionMatrix(predrf, TestSet$classe)
+```
+
+**Boosted Trees ("gbm")**
+```{r gbm, cache=TRUE, message=FALSE, warning=FALSE}
+set.seed(1234)
+capture.output(
+#    fitgbm  <- train(classe~., data=TrainSet, method="gbm", metric=metrc, trControl=trCtrl))
+    fitgbm  <- train(classe~., data=TrainSet, method="gbm"))
+predgbm <- predict(fitgbm, TestSet)
+confgbm <- confusionMatrix(predgbm, TestSet$classe)
+```
+
+**Linear Discriminant Analysis ("lda")**
+```{r lda, cache=TRUE,message=FALSE, warning=FALSE}
+set.seed(1234)
+#fitlda  <- train(classe~., data=TrainSet, method="lda", metric=metrc, trControl=trCtrl)
+fitlda  <- train(classe~., data=TrainSet, method="lda)
+predlda <- predict(fitlda, TestSet)
+conflda <- confusionMatrix(predlda, TestSet$classe)
+```
+ 
+Compare accuracy and Out of sample error of each model to determine the model to be used  
+```{r selectmodel}
+accur   <- data.frame(confrf$overall[1],confgbm$overall[1],conflda$overall[1])
+accur   <- rbind(accur, c(1-confrf$overall[1],1-confgbm$overall[1],1-conflda$overall[1]))
+colnames(accur)     <-c('RF', 'GBM','LDA')
+rownames(accur)[2]  <-"Out of Sample Error"
+accur
+```
+
+From the table above all models provided almost same accuracy, therefore, 
+**Linear Discriminant Analysis** which seems to have the lowset computational costs.
+
+## Prediction
+
+```{r prediction}
+set.seed(1234)
+predictions <- predict(fitlda, testclean)
+tblPredict  <- table(predictions,testclean$problem_id)
+
+prdCol <- names(tblPredict)
+
+for(i in 1:ncol(tblPredict)){
+      tblPredict[[i]] <- cell_spec(
+                      tblPredict[[i]], 
+                     "html", 
+                      color = ifelse(tblPredict[[i]] == 1, "blue")
+                     )
+}
+
+
+tblPredict %>% kable("html", escape = FALSE)
+```
+
+
+## Citations
+The data for this project was sourced from: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. Gratefully acknowldge the generosity of them by allowing their data to be used for this assignment.
