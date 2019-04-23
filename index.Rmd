@@ -177,7 +177,7 @@ tblPredict
 
 ## Conclusion  
 
-After cleaning the data as explained in [Cleaning data] (#cleaning), three different 
+After cleaning the data as explained in [Cleaning data](#cleaning), three different 
 algorithms were explored using cross validation. **Random Forest** had the highest 
 accuracy and of course lowest out of Sample Error, therefore model developed with RF was 
 utilised to predict the "classe" for each observation in the testing dataset. 
